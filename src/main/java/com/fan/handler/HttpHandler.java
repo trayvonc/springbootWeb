@@ -5,17 +5,21 @@ import com.alibaba.fastjson.JSONObject;
 import com.fan.service.UserService;
 import com.fan.service.UserServiceImpl;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
 import org.apache.shiro.SecurityUtils;
 import org.apache.shiro.subject.Subject;
+//import org.redisson.api.listener.MessageListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.Message;
+import org.springframework.data.redis.connection.MessageListener;
+import org.springframework.data.redis.connection.ReactiveSubscription;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -32,6 +36,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static io.netty.handler.codec.http.HttpHeaders.Names.*;
+
 /**
  * http拦截器，用于处理客户端的行为
  *
@@ -40,10 +45,10 @@ import static io.netty.handler.codec.http.HttpHeaders.Names.*;
 //@Slf4j
 @Component
 @ChannelHandler.Sharable
-public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
+public class HttpHandler extends SimpleChannelInboundHandler<HttpObject>implements MessageListener {
 
 //    private String STORE_PATH = "/FaceRecognition/unknown_pictures/";
-
+    public  final static String AUDIT_LOG_CHANNEL = "channel:1";
     private final static String uploadFaceIdQueue = "upload_faceid_queue_";
 
     private final static String faceRecogintionQueue = "face_recogintion_queue_";
@@ -58,9 +63,19 @@ public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
     RedisTemplate redisTemplate;
 //    @Autowired
 //    HttpServletRequest request; //通过注解获取一个request
+    ChannelHandlerContext ctx;
+
+    public ChannelHandlerContext getCtx() {
+        return ctx;
+    }
+
+    public void setCtx(ChannelHandlerContext ctx) {
+        this.ctx = ctx;
+    }
 
     //响应
     private void response(ChannelHandlerContext ctx, Result result) {
+
         // 1.设置响应
         FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
                 HttpResponseStatus.OK,
@@ -81,6 +96,7 @@ public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 //        userService=new UserServiceImpl();
         System.out.println();
         userService.updateTimeByName(new Date(),result.getMessage());
+
         // 2.发送
         // 注意必须在使用完之后，close channel
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
@@ -88,9 +104,14 @@ public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
+        setCtx(ctx);
+        Channel channel = ctx.channel();
+        System.out.println(channel.toString());
+        String mychannel=channel.toString();
         System.out.println("收到http连接");
         //获取请求体
         FullHttpRequest request = (FullHttpRequest) msg;
+
         //获取路径
         URI uri = new URI(request.uri());
         System.out.println(uri);
@@ -127,7 +148,7 @@ public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             return;
         }
         String imgKey = UUIDUtils.getCode();
-        String resultKey = UUIDUtils.getCode();
+//        String resultKey = UUIDUtils.getCode();
         try {
             if (personName != null && "/uploadFace".equals(uri.getPath()))
             redisTemplate.opsForHash().put(imgKey, "personName", personName);
@@ -141,47 +162,47 @@ public class HttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             if ("/checkFace".equals(uri.getPath())) {
                 // 执行人脸识别
                 randomId = new Random().nextInt(recognitionProcessCount);
-                System.out.println("人脸识别：" + faceRecogintionQueue + randomId);
-                //push到队列i，设置处理key
-                redisTemplate.opsForList().rightPush(faceRecogintionQueue + randomId, imgKey + "_" + resultKey);
+                System.out.println("发布人脸识别：" + "checkFace"+randomId);
+                redisTemplate.convertAndSend("checkFace"+randomId,imgKey + "_" + mychannel);
+
             } else if ("/uploadFace".equals(uri.getPath())) {
                 System.out.println("Face Id：" + personName);
                 // 执行人脸id上传
                 randomId = new Random().nextInt(uploadProcessCount);
-                System.out.println("人脸识别：" + uploadFaceIdQueue + randomId);
-                redisTemplate.opsForList().rightPush(uploadFaceIdQueue + randomId, imgKey + "_" + resultKey);
+                System.out.println("人脸识别：" + "uploadFace"+randomId);
+                redisTemplate.convertAndSend("uploadFace"+randomId,imgKey + "_" + mychannel);
+//
             }
-            System.out.println("消息的key：" + imgKey + "_" + resultKey);
+            System.out.println("消息的key：" + imgKey + "_" + mychannel);
 
-
-            //等待从队列上获得响应
-            int waitCount = 1;
-            while (true) {
-                Thread.sleep(1);
-                if (waitCount == 10000) {
-                    result = new Result(500, "发生未知错误导致程序执行超时");
-                    break;
-                }
-                //hash 上存在resultkey说明得到python响应
-                if (redisTemplate.hasKey(resultKey)) {
-                    String resultStr = (String) redisTemplate.opsForValue().get(resultKey);
-                    result = new Result(Integer.parseInt(resultStr.split("_")[0]),
-                            resultStr.split("_")[1]);
-                    redisTemplate.delete(resultKey);
-                    break;
-                }
-                waitCount++;
-            }
-            System.out.println("服务器回复:" + result.getStatus() + "---" + result.getMessage());
-            System.out.println(((new Date()).getTime() - startTime) / 1000.0 + "秒");
         } catch (Exception e) {
             e.printStackTrace();
             result = new Result(500, "程序执行出错");
-        } finally {
-            redisTemplate.delete(imgKey);
-            redisTemplate.delete(resultKey);
-//            jedis.close();
-            response(ctx, result);
         }
+
     }
+
+    @Override
+    public void onMessage(Message message, byte[] pattern) {
+//        Channel channel=message.getChannel();
+        Channel channel= getCtx().channel();
+        System.out.println(channel);
+
+        RedisSerializer<String> redisSerializer = redisTemplate.getStringSerializer();
+        String msg= redisSerializer.deserialize(message.getBody());
+        if(msg.split("_")[2].equals(channel.toString()))
+            System.out.println("接收到的消息是："+ msg);
+            ChannelHandlerContext ctx1 = getCtx();
+
+
+            Result result = new Result(Integer.parseInt(msg.split("_")[0]),
+                    msg.split("_")[1]);
+            System.out.println("服务器回复:" + result.getStatus() + "---" + result.getMessage());
+    //        System.out.println(((new Date()).getTime() - startTime) / 1000.0 + "秒");
+
+            response(ctx, result);
+
+
+    }
+
 }
