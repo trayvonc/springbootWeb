@@ -2,12 +2,14 @@ package com.fan.controller;
 
 import com.fan.pojo.User;
 import com.fan.service.UserService;
+import com.fan.utils.CustomFormAuthenticationFilter;
 import org.apache.shiro.SecurityUtils;
 import org.apache.shiro.authc.IncorrectCredentialsException;
 import org.apache.shiro.authc.UnknownAccountException;
 import org.apache.shiro.authc.UsernamePasswordToken;
 import org.apache.shiro.session.Session;
 import org.apache.shiro.subject.Subject;
+import org.apache.shiro.web.filter.authc.FormAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -30,7 +32,19 @@ public class LoginController {
     public String login(String username, String password, Model model, HttpServletRequest request){
         Subject subject = SecurityUtils.getSubject();
         UsernamePasswordToken usernamePasswordToken = new UsernamePasswordToken(username, password);
-        try {
+
+        String exception = (String) request.getAttribute(CustomFormAuthenticationFilter.DEFAULT_ERROR_KEY_ATTRIBUTE_NAME);
+        System.out.println("exception=" + exception);
+        if (exception != null) {
+          if ("kaptchaValidateFailed".equals(exception)) {
+                System.out.println("kaptchaValidateFailed -- > 验证码错误");
+                model.addAttribute("msg","验证码错误");
+                return "index";
+            }
+        }
+
+
+            try {
             subject.login(usernamePasswordToken);
             Session session = subject.getSession();
             session.setAttribute("loginUser",username);
@@ -67,6 +81,14 @@ public class LoginController {
             model.addAttribute("msg","密码错误");
             return "index";
         }
+//        catch(Exception e){
+//            System.out.println("getcuowu");
+//            if(e.getClass().getName().equals("kaptchaValidateFailed")){
+//                model.addAttribute("msg","验证码错误");
+//            }
+//            return "index";
+//        }
+
 
 
 

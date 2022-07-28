@@ -4,10 +4,12 @@ import com.fan.server.DiscardServer;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.servlet.ServletComponentScan;
 
 import javax.annotation.Resource;
 
 @SpringBootApplication
+@ServletComponentScan
 public class Springboot03WebApplication implements CommandLineRunner {
     @Resource
     private DiscardServer discardServer;

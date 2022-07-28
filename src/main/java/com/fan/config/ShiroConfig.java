@@ -1,13 +1,18 @@
 package com.fan.config;
 
 import at.pollux.thymeleaf.shiro.dialect.ShiroDialect;
+import com.fan.utils.CustomFormAuthenticationFilter;
+import org.apache.commons.collections.map.HashedMap;
 import org.apache.shiro.authc.credential.HashedCredentialsMatcher;
 import org.apache.shiro.spring.web.ShiroFilterFactoryBean;
+import org.apache.shiro.web.filter.authc.FormAuthenticationFilter;
 import org.apache.shiro.web.mgt.DefaultWebSecurityManager;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import javax.servlet.Filter;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,12 +31,16 @@ public class ShiroConfig {
 //        filterMap.put("/user/update","authc");
         filterMap.put("/user/login","anon");
         filterMap.put("/empqiandao/**","anon");
+        filterMap.put("/validatecodeServlet","anon");
+
 
         shiroFilterFactoryBean.setFilterChainDefinitionMap(filterMap);
         shiroFilterFactoryBean.setLoginUrl("/user/login");//请求url
         shiroFilterFactoryBean.setUnauthorizedUrl("/noauth");
 
-
+        Map<String, Filter> filters=new HashMap<String, Filter>() ;
+        filters.put("authc",new CustomFormAuthenticationFilter());
+        shiroFilterFactoryBean.setFilters(filters);
         return shiroFilterFactoryBean;
     }
 
